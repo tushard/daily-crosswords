@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- ====================================================================
+  CROSSWORD GENERATOR – production-ready, modular & fully documented
+  --------------------------------------------------------------------
+  Features
+  • Greedy crossword-layout algorithm with overlap heuristic & back-tracking-light improvements
+  • Responsive, centered UI (grid + clues) – scrolls when large
+  • Editable grid with arrow-key navigation (← ↑ → ↓) & input sanitisation
+  • Toggle answers with a checkbox for teachers / self-check
+  • Animated “Congratulations” overlay on perfect completion (dismiss on click/tap)
+  • No stray numbering – numbering only on true clue starts
+  --------------------------------------------------------------------
+  HOW TO USE
+  1. Enter each entry as  "ANSWER clue-text"  (single space after answer).
+  2. Click  ➜  Generate  – the algorithm will lay out & render the crossword.
+  3. Solve directly in the browser; arrow keys move the caret.
+  4. Tick  “Answers”  to reveal / hide the solution.
+===================================================================== -->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crossword Generator</title>
+
+  <!-- ========== THEME VARIABLES ========== -->
+  <style>
+    :root{
+      --cell-size:   32px;           /* grid cell square (px) */
+      --accent:      #0d6efd;        /* Bootstrap primary blue */
+      --grid-border: #222;           /* dark grid line */
+      --bg:          #f7f8fc;        /* page background */
+    }
+  </style>
+
+  <!-- ========== GLOBAL STYLES ========== -->
+  <style>
+    /* --- Reset & base typography ------------------------------------- */
+    *{box-sizing:border-box;margin:0}
+    body{padding:20px;font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:#111}
+    h1{margin-bottom:0.4em;font-size:1.8rem}
+    textarea{width:100%;max-width:640px;font-family:inherit}
+
+    /* --- Buttons ------------------------------------------------------ */
+    button{
+      appearance:none;border:none;border-radius:4px;cursor:pointer;
+      background:var(--accent);color:#fff;padding:10px 24px;font-size:15px;
+      transition:background .15s
+    }
+    button:hover{background:#0b5ad8}
+
+    /* --- Crossword grid ---------------------------------------------- */
+    #grid{border-collapse:collapse}
+    #grid td{
+      width:var(--cell-size);height:var(--cell-size);
+      border:1px solid var(--grid-border);
+      text-align:center;vertical-align:middle;
+      position:relative;font-weight:600;font-size:18px;
+    }
+    #grid td.filled{background:#000}
+    #grid span.num{
+      position:absolute;top:2px;left:4px;font-size:10px;font-weight:normal;color:#555;
+      user-select:none;pointer-events:none
+    }
+    #grid span.char{
+      display:inline-block;width:100%;height:100%;line-height:calc(var(--cell-size) - 2px);
+      outline:none
+    }
+    #grid span.char:focus{background:#ffe8a3}
+
+    /* --- Layout wrappers --------------------------------------------- */
+    .cwWrap{margin-top:24px;display:flex;flex-direction:column;align-items:center;gap:28px}
+
+    /* --- Clue panes --------------------------------------------------- */
+    #legend{display:flex;gap:60px;flex-wrap:wrap;justify-content:center}
+    .clueCol{min-width:240px;max-width:45%}
+    .clueCol h3{margin-bottom:8px;color:var(--accent);text-align:center;font-size:1.1rem}
+    .clueBox{
+      max-height:240px;overflow-y:auto;padding-right:8px;
+      scrollbar-width:thin;scrollbar-color:var(--accent)#e1e5ee
+    }
+    /* custom scrollbar (webkit) */
+    .clueBox::-webkit-scrollbar{width:8px}
+    .clueBox::-webkit-scrollbar-thumb{background:var(--accent);border-radius:4px}
+
+    ul.clueList{list-style:none;padding:0}
+    ul.clueList li{margin-bottom:6px;font-size:16px}
+    ul.clueList li strong{margin-right:4px}
+
+    /* --- Congrats overlay -------------------------------------------- */
+    .congrats{position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;animation:fadeIn .4s ease-out}
+    .congrats h2{background:var(--accent);color:#fff;padding:22px 48px;border-radius:8px;box-shadow:0 8px 26px rgba(0,0,0,.35);animation:pop .6s ease-out;user-select:none}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    @keyframes pop{0%{transform:scale(.5)}60%{transform:scale(1.05)}to{transform:scale(1)}}
+
+    /* --- Utility helpers --------------------------------------------- */
+    details{margin:1em 0;padding:0.6em;border:1px solid #ccc;border-radius:6px}
+  </style>
+</head>
+<body>
+  <h1><center>Daily Crossword</center></h1>
+  <!--<p>Enter each line in the format <code>ANSWER clue-text</code>, then click <strong>Generate</strong>.</p>-->
+
+  <textarea id="input" rows="8">
+RIVER Major watercourse flowing to a sea or lake  
+SOLAR Relating to the sun  
+BANK Place to keep money safe  
+PLUTO Once considered the ninth planet  
+ACORN Nut from an oak tree  
+GLASS Material made from sand, often used in windows  
+OLIVE Small fruit, often pressed for oil  
+OPERA Dramatic work combining text and musical score  
+NEPAL Country with part of the Himalayas  
+WHALE Largest mammal living in the ocean  
+ANTHEM Song expressing national pride  
+ALBUM Collection of songs or photographs  
+EAGLE Bird known for its keen eyesight  
+CHAIR Furniture piece for sitting  
+LUNAR Relating to the moon  
+QUILL Old writing tool, often from a bird  
+PIXEL Smallest unit of a digital image  
+VENUS Second planet from the sun  
+OZONE Protective atmospheric layer  
+FIBER Material made from strands, often in diet  
+IRON Commonly used metal, symbol Fe  
+MANGO Tropical fruit with a large pit  
+PEARL Gem formed inside an oyster  
+COMET Celestial body with a glowing tail  
+JAZZ Music genre with improvisation and swing
+  </textarea><br/>
+
+  <button id="btnGenerate">Generate</button>
+  <div style="text-align: center;">
+    <label style="margin-left:18px"><input type="checkbox" id="showAns"/> Answers</label>
+  </div>
+
+  <div id="output"></div>
+
+<!-- =================================================================================
+  JAVASCRIPT  – split into logical modules for readability
+================================================================================== -->
+<script>
+/*************************************************
+ *  CrosswordGenerator (layout + numbering logic)
+ *************************************************/
+class CrosswordGenerator{
+  /**
+   * @param {Array<{word:string, clue:string}>} rawEntries – unsorted list from UI
+   */
+  constructor(rawEntries){
+    /* 1 – prepare ----------------------------------------------------------------- */
+    this.entries = [...rawEntries].sort((a,b)=>b.word.length-a.word.length);
+    this.boardSize = this._suggestBoardSize();
+    this.center    = Math.floor(this.boardSize/2);
+    this.grid      = Array.from({length:this.boardSize},()=>Array(this.boardSize).fill(''));
+    this.placed    = [];            // placed word metadata
+
+    /* 2 – layout words ------------------------------------------------------------- */
+    this._layOut();
+    this._crop();
+
+    /* 3 – numbering & clue lists --------------------------------------------------- */
+    this._buildNumbers();
+  }
+
+  /* ───────────────── PUBLIC RENDER ───────────────── */
+  renderHTML(){
+    return `<div class="cwWrap">
+              ${this._renderGrid()}
+              ${this._renderLegend()}
+            </div>`;
+  }
+
+  /* ───────────────── Size helper ────────────────── */
+  _suggestBoardSize(){
+    const longest = Math.max(...this.entries.map(e=>e.word.length));
+    const total   = this.entries.reduce((s,e)=>s+e.word.length,0);
+    return Math.max(11, longest+4, Math.ceil(Math.sqrt(total*2)));
+  }
+
+  /* ───────────────── Layout algorithm ──────────── */
+  _layOut(){
+    // Place the first (longest) word centrally, horizontally
+    const first   = this.entries[0];
+    const startX  = this.center - Math.floor(first.word.length/2);
+    for(let i=0;i<first.word.length;i++) this.grid[this.center][startX+i] = first.word[i];
+    this.placed.push({...first, x:startX, y:this.center, dir:'across', dx:1, dy:0});
+
+    // Greedy placement with overlap heuristic
+    for(let i=1;i<this.entries.length;i++){
+      const entry = this.entries[i];
+      const bestLocation = this._findBestSpot(entry.word);
+      if(bestLocation){
+        const {x,y,dx,dy} = bestLocation;
+        for(let k=0;k<entry.word.length;k++){
+          this.grid[y+dy*k][x+dx*k] = entry.word[k];
+        }
+        this.placed.push({...entry, x,y,dx,dy,dir:dx? 'across':'down'});
+      }
+    }
+  }
+
+  /** search all cells for optimal placement of `word`. returns null if none fits */
+  _findBestSpot(word){
+    let bestOverlap=null, bestAny=null;
+    for(const [dir,dx,dy] of [['across',1,0],['down',0,1]]){
+      const maxX=this.boardSize-(dx?word.length:0);
+      const maxY=this.boardSize-(dy?word.length:0);
+      for(let y=0;y<=maxY;y++){
+        for(let x=0;x<=maxX;x++){
+          const overlaps=this._canPlace(word,x,y,dx,dy);
+          if(overlaps<0) continue;      // conflict
+          const score = overlaps*1000 - Math.abs(this.center-x) - Math.abs(this.center-y);
+          const loc = {word,x,y,dx,dy,score};
+          if(overlaps>0){
+            if(!bestOverlap || score>bestOverlap.score) bestOverlap=loc;
+          }else if(!bestAny || score>bestAny.score){
+            bestAny = loc;
+          }
+        }
+      }
+    }
+    return bestOverlap || bestAny;
+  }
+
+  /** validate placement.  return number of overlaps, or −1 if illegal */
+  _canPlace(word,x,y,dx,dy){
+    let overlaps=0;
+    for(let k=0;k<word.length;k++){
+      const cx=x+k*dx, cy=y+k*dy;
+      if(!this._inBounds(cx,cy)) return -1;
+      const cell=this.grid[cy][cx];
+      if(cell!=='' && cell!==word[k]) return -1;       // conflicting letter
+      if(cell!=='' ) overlaps++; else {
+        // check perpendicular adjacency to avoid illegal touches
+        for(const [ax,ay] of [[-dy,-dx],[dy,dx]]){
+          const nx=cx+ax, ny=cy+ay;
+          if(this._inBounds(nx,ny) && this.grid[ny][nx]!=='') return -1;
+        }
+      }
+    }
+    // check head & tail boundaries
+    const beforeX=x-dx, beforeY=y-dy, afterX=x+dx*word.length, afterY=y+dy*word.length;
+    if(this._inBounds(beforeX,beforeY) && this.grid[beforeY][beforeX]!=='') return -1;
+    if(this._inBounds(afterX,afterY)   && this.grid[afterY][afterX]  !=='') return -1;
+    return overlaps;
+  }
+  _inBounds(x,y){return x>=0 && y>=0 && x<this.boardSize && y<this.boardSize;}
+
+  /* ───────────────── Crop blank border ────────── */
+  _crop(){
+    let minX=this.boardSize,minY=this.boardSize,maxX=-1,maxY=-1;
+    for(let y=0;y<this.boardSize;y++) for(let x=0;x<this.boardSize;x++)
+      if(this.grid[y][x]!==''){minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);}    
+    this.grid = this.grid.slice(minY,maxY+1).map(r=>r.slice(minX,maxX+1));
+    for(const p of this.placed){p.x-=minX; p.y-=minY;}
+  }
+
+  /* ───────────────── Number cells + clue lists ── */
+  _buildNumbers(){
+    const h=this.grid.length,w=this.grid[0].length;
+    this.numGrid = Array.from({length:h},()=>Array(w).fill(0));
+
+    // identify true starting positions from placed list
+    const acrossStart=new Set(), downStart=new Set();
+    for(const p of this.placed){
+      const key=`${p.x},${p.y}`;
+      (p.dir==='across'? acrossStart:downStart).add(key);
+    }
+
+    let n=1;
+    for(let y=0;y<h;y++) for(let x=0;x<w;x++) if(this.grid[y][x]!==''){
+      const key=`${x},${y}`;
+      if(acrossStart.has(key) || downStart.has(key)) this.numGrid[y][x]=n++;
+    }
+
+    // produce Across & Down clue arrays (sorted)
+    this.across=[]; this.down=[];
+    for(const p of this.placed){
+      const num=this.numGrid[p.y][p.x];
+      (p.dir==='across'?this.across:this.down).push({num,clue:p.clue});
+    }
+    this.across.sort((a,b)=>a.num-b.num);
+    this.down  .sort((a,b)=>a.num-b.num);
+  }
+
+  /* ───────────────── Render helpers ──────────── */
+  _renderGrid(){
+    let html='<table id="grid">';
+    for(let y=0;y<this.grid.length;y++){
+      html+='<tr>';
+      for(let x=0;x<this.grid[0].length;x++){
+        const letter=this.grid[y][x], num=this.numGrid[y][x];
+        if(letter==='') html+='<td class="filled"></td>'; else html+=`
+          <td>
+            <span class="num">${num||''}</span>
+            <span class="char" contenteditable tabindex="0" data-letter="${letter}" data-x="${x}" data-y="${y}"></span>
+          </td>`;
+      }
+      html+='</tr>';
+    }
+    html+='</table>';
+    return html;
+  }
+
+  _renderLegend(){
+    const list=arr=>`<ul class="clueList">${arr.map(o=>`<li><strong>${o.num}</strong> ${o.clue}</li>`).join('')}</ul>`;
+    return `<div id="legend">
+              <div class="clueCol"><h3>Across</h3><div class="clueBox">${list(this.across)}</div></div>
+              <div class="clueCol"><h3>Down</h3><div class="clueBox">${list(this.down)}</div></div>
+            </div>`;
+  }
+}
+
+/*************************************************
+ *  UI Controller – wires DOM ↔ Crossword logic
+ *************************************************/
+class UIController{
+  constructor(){
+    this.btnGenerate = document.getElementById('btnGenerate');
+    this.txtInput    = document.getElementById('input');
+    this.chkAns      = document.getElementById('showAns');
+    this.outEl       = document.getElementById('output');
+
+    this._bindEvents();
+  }
+  _bindEvents(){
+    this.btnGenerate.addEventListener('click',()=>this.generate());
+    this.chkAns.addEventListener('change',()=>this._toggleAnswers());
+  }
+
+  /* --- build crossword from textarea -------------------------------- */
+  generate(){
+    const lines=this.txtInput.value.trim().split(/\r?\n/).filter(Boolean);
+    const entries=lines.map(l=>{
+      const i=l.indexOf(' ');
+      return {word:l.slice(0,i).toUpperCase(), clue:l.slice(i+1).trim()};
+    });
+    this.cw = new CrosswordGenerator(entries);
+    this.outEl.innerHTML = this.cw.renderHTML();
+    this._cacheCharSpans();
+    this._toggleAnswers(); // refresh state
+  }
+
+  /* --- cache interactive <span.char> nodes ------------------------------------ */
+  _cacheCharSpans(){
+    this.charSpans = [...document.querySelectorAll('#grid .char')];
+    // input sanitiser + completion check
+    const onInput = e=>{
+      e.target.innerText = e.target.innerText.replace(/[^A-Za-z]/g,'').slice(0,1).toUpperCase();
+      this._checkSolved();
+    };
+    // arrow-key navigation handler
+    const arrows = {ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};
+    const onKey = e=>{
+      if(!(e.key in arrows)) return;
+      e.preventDefault();
+      const [dx,dy]=arrows[e.key];
+      const nx=+e.target.dataset.x+dx, ny=+e.target.dataset.y+dy;
+      const next=document.querySelector(`#grid .char[data-x="${nx}"][data-y="${ny}"]`);
+      if(next) next.focus();
+    };
+    this.charSpans.forEach(sp=>{sp.addEventListener('input',onInput);sp.addEventListener('keydown',onKey);});
+  }
+
+  /* --- answer reveal/hide ------------------------------------------ */
+  _toggleAnswers(){
+    if(!this.charSpans) return;
+    this.charSpans.forEach(sp=>sp.innerText = this.chkAns.checked ? sp.dataset.letter : '');
+  }
+
+  /* --- completion detection & overlay ------------------------------- */
+  _checkSolved(){
+    const solved = this.charSpans.every(sp=>sp.innerText===sp.dataset.letter);
+    if(solved) this._showCongrats();
+  }
+  _showCongrats(){
+    if(document.querySelector('.congrats')) return; // already shown
+    const overlay=document.createElement('div'); overlay.className='congrats';
+    overlay.innerHTML='<h2>🎉 Congratulations! 🎉</h2>';
+    document.body.appendChild(overlay);
+    // dismiss on first click anywhere
+    const dismiss=()=>overlay.remove();
+    document.addEventListener('click',dismiss,{once:true,capture:true});
+  }
+}
+
+/* ---- bootstrap --------------------------------------------------------- */
+window.addEventListener('DOMContentLoaded',()=>new UIController());
+
+window.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('btnGenerate').click();
+    // Then hide input and button
+    document.getElementById('input').style.display = 'none';
+    document.getElementById('btnGenerate').style.display = 'none';
+});
+</script>
+</script>
+</body>
+</html>
